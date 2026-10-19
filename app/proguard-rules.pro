@@ -1,0 +1,1 @@
+-keep class com.yy.myuko.feature.encryptionsdk.bridge.** { *; }
