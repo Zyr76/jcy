@@ -44,7 +44,7 @@ public final class PlaybackRepository {
         qualitiesBody.put("videoId", videoId);
         qualitiesBody.put("code", code);
         qualitiesBody.put("episodeNum", 1);
-        qualitiesBody.put("caps", new JSONArray());
+        qualitiesBody.put("caps", caps());
         JSONObject qualitiesData = api.post("/api/v1/app/client/resolve/qualities", qualitiesBody);
 
         String quality = "";
@@ -71,7 +71,7 @@ public final class PlaybackRepository {
         exchangeBody.put("quality", quality);
         exchangeBody.put("exchangeToken", exchangeToken);
         exchangeBody.put("adToken", JSONObject.NULL);
-        exchangeBody.put("caps", new JSONArray());
+        exchangeBody.put("caps", caps());
         JSONObject exchangeData = api.post("/api/v1/app/client/resolve/exchange", exchangeBody);
 
         String playUrl = exchangeData.optString("playUrl", "");
@@ -95,6 +95,12 @@ public final class PlaybackRepository {
             throw new IllegalStateException("该集返回 Lua 解析脚本，当前原型仅支持直链/HLS");
         }
         throw new IllegalStateException("resolve/exchange 未返回 playUrl 或 playlist");
+    }
+
+    private static JSONArray caps() {
+        JSONArray caps = new JSONArray();
+        caps.put("v2ts");
+        return caps;
     }
 
     private static File buildM3u8(Context context, ApiClient api, JSONObject playlist) throws Exception {
