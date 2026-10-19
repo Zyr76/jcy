@@ -1,6 +1,7 @@
 package com.jcy.client;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Intent;
 import android.graphics.Color;
 import android.os.Bundle;
@@ -15,11 +16,14 @@ import android.widget.Button;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ListView;
+import android.widget.ScrollView;
 import android.widget.TextView;
 
 import com.jcy.client.api.HomeRepository;
 import com.jcy.client.model.VideoItem;
 import com.jcy.client.ui.ImageLoader;
+
+import org.json.JSONObject;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -30,6 +34,7 @@ public final class MainActivity extends Activity {
     private final List<VideoItem> items = new ArrayList<>();
     private TextView status;
     private Button refresh;
+    private Button adConfig;
     private VideoAdapter adapter;
     private ImageLoader imageLoader;
 
@@ -65,6 +70,11 @@ public final class MainActivity extends Activity {
         refresh.setText("刷新");
         refresh.setOnClickListener(v -> load());
         root.addView(refresh);
+
+        adConfig = new Button(this);
+        adConfig.setText("广告配置");
+        adConfig.setOnClickListener(v -> loadAdConfig());
+        root.addView(adConfig);
 
         ListView listView = new ListView(this);
         listView.setDivider(null);
@@ -107,6 +117,46 @@ public final class MainActivity extends Activity {
                 });
             }
         }, "jcy-home").start();
+    }
+
+    private void loadAdConfig() {
+        adConfig.setEnabled(false);
+        status.setText("正在读取广告配置...");
+        new Thread(() -> {
+            try {
+                Session session = Session.init(getApplicationContext());
+                JSONObject body = new JSONObject();
+                body.put("slotCode", JSONObject.NULL);
+                JSONObject data = session.api.post("/api/v1/app/client/ad/getSlots", body);
+                String text = data.toString(2);
+                runOnUiThread(() -> {
+                    status.setText("广告配置已返回");
+                    showTextDialog("广告配置", text);
+                    adConfig.setEnabled(true);
+                });
+            } catch (Exception e) {
+                Log.e(TAG, "ad config failed", e);
+                runOnUiThread(() -> {
+                    status.setText("广告配置失败: " + errorText(e));
+                    adConfig.setEnabled(true);
+                });
+            }
+        }, "jcy-ad-config").start();
+    }
+
+    private void showTextDialog(String title, String text) {
+        TextView content = new TextView(this);
+        content.setText(text);
+        content.setTextIsSelectable(true);
+        content.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        content.setPadding(dp(16), dp(12), dp(16), dp(12));
+        ScrollView scroll = new ScrollView(this);
+        scroll.addView(content);
+        new AlertDialog.Builder(this)
+                .setTitle(title)
+                .setView(scroll)
+                .setPositiveButton("关闭", null)
+                .show();
     }
 
     private static String errorText(Throwable error) {
