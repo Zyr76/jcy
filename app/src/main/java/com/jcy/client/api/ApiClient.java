@@ -100,7 +100,8 @@ public final class ApiClient {
 
         JSONObject envelope = new JSONObject(new String(decoded, StandardCharsets.UTF_8));
         int code = envelope.optInt("code", -1);
-        if (code != 0) {
+        boolean success = code == 0 || (code >= 200 && code < 300);
+        if (!success) {
             throw new ApiException(code, envelope.optString("msg",
                     envelope.optString("message", "")));
         }
