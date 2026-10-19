@@ -8,7 +8,9 @@ import org.json.JSONObject;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 public final class Bootstrap {
     private Bootstrap() {
@@ -40,7 +42,10 @@ public final class Bootstrap {
             try {
                 String url = baseUrl + "/api/v1/app/client/auth/bootstrap.jpg?appId="
                         + ApiConfig.APP_ID + "&sv=" + version + "&_t=" + System.currentTimeMillis();
-                byte[] jpeg = HttpHolder.get(url);
+                Map<String, String> headers = new LinkedHashMap<>();
+                headers.put("X-App-Id", ApiConfig.APP_ID);
+                headers.put("X-Platform", "android");
+                byte[] jpeg = HttpHolder.get(url, headers);
                 return decode(jpeg);
             } catch (Exception e) {
                 last = e;
@@ -252,8 +257,8 @@ public final class Bootstrap {
     }
 
     private static final class HttpHolder {
-        static byte[] get(String url) throws Exception {
-            return com.jcy.client.api.Http.getBytes(url, null);
+        static byte[] get(String url, Map<String, String> headers) throws Exception {
+            return com.jcy.client.api.Http.getBytes(url, headers);
         }
     }
 }
