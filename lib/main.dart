@@ -85,16 +85,18 @@ class _ProbePageState extends State<ProbePage> {
               children: [
                 _button('get_app_info', () => run('get_app_info', () {
                       final result = Gateway.throughLoader('get_app_info');
-                      appInfo = result['response'] is Map
-                          ? Map<String, dynamic>.from(result['response'] as Map)
-                          : null;
+                      final payload = result['payload'];
+                      if (payload is Map) {
+                        appInfo = Map<String, dynamic>.from(payload);
+                      }
                       return result;
                     })),
                 _button('get_host_config', () => run('get_host_config', () {
                       final result = Gateway.throughLoader('get_host_config');
-                      hostConfig = result['response'] is Map
-                          ? Map<String, dynamic>.from(result['response'] as Map)
-                          : null;
+                      final payload = result['payload'];
+                      if (payload is Map) {
+                        hostConfig = Map<String, dynamic>.from(payload);
+                      }
                       return result;
                     })),
                 _button('get_registries', () =>
