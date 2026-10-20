@@ -1,9 +1,0 @@
-pluginManagement {
-    repositories {
-        google()
-        mavenCentral()
-        maven { url 'https://mirrors.cloud.tencent.com/nexus/repository/maven-public/' }
-    }
-}
-rootProject.name = "JcyClient"
-include ':app'

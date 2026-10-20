@@ -1,42 +1,45 @@
-# 囧次元极简客户端
+# 囧次元客户端（Flutter）
 
-这是一个基于逆向分析结果的 Android 最小客户端，只做两件事：
+基于逆向分析结果重写的客户端：**逻辑层与 native 核完全复用，UI 层用 Flutter 全新实现**。
 
-1. 展示首页影视列表；
-2. 点击后解析并播放第一集。
+## 结构
+
+```
+lib/                 Flutter UI 层（全新）
+  main.dart          入口、深色主题
+  theme.dart         配色与 Material 主题
+  logic.dart         MethodChannel 客户端（home / resolve）
+  models.dart        VideoItem / PlayInfo
+  screens/           首页、播放页
+  widgets/           焦点轮播、海报卡、骨架屏
+android/             Android 宿主
+  app/src/main/java/com/jcy/client/
+    api/ crypto/ model/ Session/ApiConfig   ← 原逻辑层，未改动
+    MagicInit + jniLibs/libmagic_cipher.so  ← 原 native 核
+    LogicBridge.java  把逻辑层暴露为 MethodChannel
+    MainActivity.java FlutterActivity 宿主
+```
 
 ## 界面
 
-- 深色影院风首页：自动轮播焦点卡（评分/更新进度徽标、渐变遮罩）、双列海报网格、滚动渐显顶栏；
-- 加载骨架屏、下拉刷新、错误重试；
-- 全屏播放器：自定义控制条（进度拖动、播放/暂停、横竖屏切换）、缓冲指示、解析中状态与错误面板；
-- 纯 framework 实现，无第三方依赖，APK ≈ 280 KB；
-- 自适应/矢量图标，深色主题与沉浸式状态栏。
-
-逻辑层（`api/`、`crypto/`、`model/`、`Session`）未改动。
+- 深色影院风首页：自动轮播焦点卡（评分/更新徽标、渐变遮罩）、双列海报网格、滚动渐显顶栏；
+- 骨架屏加载、下拉刷新、错误重试；
+- 全屏播放器：自定义控制层（拖动进度、播放/暂停、全屏横屏）、缓冲与错误状态；
+- 自适应/矢量图标、沉浸式状态栏。
 
 ## 构建
 
+本地（arm64 只能出 debug）：
+
 ```bash
-./gradlew assembleDebug
+flutter pub get
+flutter build apk --debug --target-platform android-arm64
 ```
 
-或者推到 GitHub，使用 `.github/workflows/android.yml` 自动构建，产物在 Actions 的 `jcy-client-debug` artifact 中。
-
-## 已实现
-
-- 通过 `http://43.162.222.119:8080/api/v1/resolve?app_id=2090640174649008128` 获取 `polyvision` 真实 endpoint；
-- 拉取 `/api/v1/app/client/auth/bootstrap.jpg`，解析 JPEG 尾部隐写载荷；
-- 调用 `libmagic_cipher.so` 的 `nativeBootstrapDeriveCandidateKeys`、AES-256-CBC + HMAC-SHA256 解密 bootstrap；
-- 请求签名 `MD5(timestamp + nonce + appId + signSecret)`；
-- 设备指纹 `maesProcess` + `mbase64Process` + HMAC-SHA256；
-- 请求体 `encryptV3` / 响应 `decryptV3`；
-- 首页 `/home/recommend`，详情 `/video/detail`，播放解析 `/resolve/qualities` + `/resolve/exchange`；
-- 直链 / HLS playlist 播放（`VideoView`）。
+推到 GitHub 后由 `.github/workflows/android.yml` 在 x64 runner 上出 release（按 ABI 拆分），产物为 `jcy-client-release` artifact。
 
 ## 限制
 
-- 只播放第一集，且只取第一个播放源/第一个清晰度；
-- 如果服务端返回 `luaScript`/`clientScript` 而没有直链或 playlist，当前版本会提示“需要 Lua 解析”；
-- 登录、VIP、广告 token、弹幕、下载、投屏均未实现；
+- 逻辑层保持原型能力：只播放第一集、取第一个播放源/清晰度；
+- 登录、VIP、广告 token、弹幕、下载、投屏未实现；
 - 仅用于授权靶场/自有服务的技术验证。

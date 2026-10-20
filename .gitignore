@@ -5,3 +5,11 @@ local.properties
 .idea/
 .DS_Store
 app/build/
+
+# Flutter
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+build/
+android/local.properties
+android/.gradle/
