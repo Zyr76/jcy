@@ -66,7 +66,7 @@ class _ProbePageState extends State<ProbePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('协议探针'),
+        title: const Text('协议探针 · b2'),
         backgroundColor: const Color(0xFF12141C),
         actions: [
           IconButton(
@@ -114,6 +114,15 @@ class _ProbePageState extends State<ProbePage> {
             ),
           ),
           if (busy) const LinearProgressIndicator(minHeight: 2),
+          Container(
+            width: double.infinity,
+            color: const Color(0xFF182030),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            child: const Text(
+              '版本 0.1.2 / build b2 —— 若标题不是 b2 说明装的是旧包',
+              style: TextStyle(fontSize: 11, color: Color(0xFF9FB0C9)),
+            ),
+          ),
           Expanded(
             child: SingleChildScrollView(
               padding: const EdgeInsets.all(12),
