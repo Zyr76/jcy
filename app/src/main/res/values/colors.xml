@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="jcy_bg">#08090D</color>
+    <color name="jcy_surface">#12141C</color>
+    <color name="jcy_accent">#7C5CFF</color>
+    <color name="jcy_accent_2">#3BE1F1</color>
+    <color name="ic_launcher_background">#12141C</color>
+</resources>

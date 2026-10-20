@@ -1,162 +1,280 @@
 package com.jcy.client;
 
 import android.app.Activity;
-import android.app.AlertDialog;
 import android.content.Intent;
 import android.graphics.Color;
 import android.os.Bundle;
-import android.text.TextUtils;
-import android.util.Log;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.BaseAdapter;
-import android.widget.Button;
-import android.widget.ImageView;
+import android.widget.AbsListView;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ListView;
-import android.widget.ScrollView;
 import android.widget.TextView;
 
 import com.jcy.client.api.HomeRepository;
 import com.jcy.client.model.VideoItem;
+import com.jcy.client.ui.HomeAdapter;
 import com.jcy.client.ui.ImageLoader;
+import com.jcy.client.ui.RefreshLayout;
+import com.jcy.client.ui.SkeletonView;
+import com.jcy.client.ui.Theme;
 
-import org.json.JSONObject;
-
-import java.util.ArrayList;
 import java.util.List;
 
 public final class MainActivity extends Activity {
-    private static final String TAG = "JcyMain";
-
-    private final List<VideoItem> items = new ArrayList<>();
-    private TextView status;
-    private Button refresh;
-    private Button adConfig;
-    private VideoAdapter adapter;
     private ImageLoader imageLoader;
+    private HomeAdapter adapter;
+    private RefreshLayout refreshLayout;
+    private ListView listView;
+    private View header;
+    private View skeleton;
+    private View errorBox;
+    private TextView errorText;
+    private boolean loaded;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         imageLoader = new ImageLoader();
-        setContentView(buildUi());
+
+        FrameLayout root = new FrameLayout(this);
+        root.setBackgroundColor(Theme.BG);
+
+        listView = new ListView(this);
+        listView.setDivider(null);
+        listView.setDividerHeight(0);
+        listView.setSelector(android.R.color.transparent);
+        listView.setVerticalScrollBarEnabled(false);
+        listView.setClipToPadding(false);
+        listView.setBackgroundColor(Theme.BG);
+        int headerSpace = Theme.statusBarHeight(this) + Theme.dp(this, 58);
+        listView.setPadding(0, headerSpace, 0, Theme.dp(this, 24) + navBar());
+        listView.setOnScrollListener(new AbsListView.OnScrollListener() {
+            @Override
+            public void onScrollStateChanged(AbsListView view, int scrollState) {
+            }
+
+            @Override
+            public void onScroll(AbsListView view, int first, int visible, int total) {
+                float offset = 0f;
+                if (view.getChildCount() > 0) {
+                    offset = -view.getChildAt(0).getTop() + view.getPaddingTop();
+                }
+                float progress = Math.min(1f, Math.max(0f, offset / Theme.dp(MainActivity.this, 90)));
+                header.setBackgroundColor(withAlpha(Theme.BG, progress));
+                header.setTranslationZ(progress > 0.02f ? Theme.dp(MainActivity.this, 6) : 0);
+            }
+        });
+
+        adapter = new HomeAdapter(this, imageLoader, this::openPlayer);
+        listView.setAdapter(adapter);
+
+        refreshLayout = new RefreshLayout(this, listView);
+        refreshLayout.setOnRefresh(this::load);
+        root.addView(refreshLayout, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+        header = buildHeader();
+        root.addView(header, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        skeleton = buildSkeleton();
+        root.addView(skeleton, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+        errorBox = buildError();
+        errorBox.setVisibility(View.GONE);
+        root.addView(errorBox, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+        setContentView(root);
         load();
     }
 
-    private View buildUi() {
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(16), dp(12), dp(16), 0);
-        root.setBackgroundColor(Color.WHITE);
+    private View buildHeader() {
+        LinearLayout bar = new LinearLayout(this);
+        bar.setOrientation(LinearLayout.HORIZONTAL);
+        bar.setGravity(Gravity.CENTER_VERTICAL);
+        bar.setPadding(Theme.dp(this, 18), Theme.statusBarHeight(this),
+                Theme.dp(this, 14), 0);
+
+        LinearLayout titles = new LinearLayout(this);
+        titles.setOrientation(LinearLayout.VERTICAL);
+        bar.addView(titles, new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 1));
 
         TextView title = new TextView(this);
-        title.setText("囧次元极简客户端");
-        title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 22);
-        title.setTextColor(Color.BLACK);
-        title.setGravity(Gravity.START);
-        root.addView(title);
+        title.setText("囧次元");
+        title.setTextColor(Theme.TEXT);
+        title.setTypeface(Theme.display());
+        title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20);
+        titles.addView(title);
 
-        status = new TextView(this);
-        status.setText("准备中...");
-        status.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-        status.setTextColor(Color.rgb(0x66, 0x66, 0x66));
-        status.setPadding(0, dp(6), 0, dp(6));
-        root.addView(status);
+        TextView subtitle = new TextView(this);
+        subtitle.setText("发现 · 追剧 · 收藏");
+        subtitle.setTextColor(Theme.TEXT_MUTED);
+        subtitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+        LinearLayout.LayoutParams subParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        subParams.topMargin = Theme.dp(this, 1);
+        titles.addView(subtitle, subParams);
 
-        refresh = new Button(this);
-        refresh.setText("刷新");
-        refresh.setOnClickListener(v -> load());
-        root.addView(refresh);
-
-        adConfig = new Button(this);
-        adConfig.setText("广告配置");
-        adConfig.setOnClickListener(v -> loadAdConfig());
-        root.addView(adConfig);
-
-        ListView listView = new ListView(this);
-        listView.setDivider(null);
-        adapter = new VideoAdapter();
-        listView.setAdapter(adapter);
-        listView.setOnItemClickListener((parent, view, position, id) -> {
-            VideoItem item = items.get(position);
-            Intent intent = new Intent(MainActivity.this, PlayerActivity.class);
-            intent.putExtra("videoId", item.id);
-            intent.putExtra("title", item.title);
-            startActivity(intent);
+        TextView action = new TextView(this);
+        action.setText("刷新");
+        action.setTextColor(Theme.TEXT);
+        action.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        action.setTypeface(Theme.medium());
+        action.setGravity(Gravity.CENTER);
+        action.setPadding(Theme.dp(this, 14), Theme.dp(this, 7),
+                Theme.dp(this, 14), Theme.dp(this, 7));
+        action.setBackground(Theme.pressable(0x1FFFFFFF, 18, this));
+        action.setOnClickListener(v -> {
+            if (!loaded) {
+                return;
+            }
+            refreshLayout.setEnabled(true);
+            load();
         });
-        root.addView(listView, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
-        return root;
+        bar.addView(action, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        LinearLayout wrapper = new LinearLayout(this);
+        wrapper.setOrientation(LinearLayout.VERTICAL);
+        wrapper.addView(bar, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        wrapper.setPadding(0, 0, 0, Theme.dp(this, 8));
+        return wrapper;
+    }
+
+    private View buildSkeleton() {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(Theme.dp(this, 16), Theme.statusBarHeight(this) + Theme.dp(this, 74),
+                Theme.dp(this, 16), 0);
+
+        SkeletonView hero = new SkeletonView(this);
+        box.addView(hero, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, HomeAdapter.heroHeight(this)));
+
+        View section = new SkeletonView(this);
+        LinearLayout.LayoutParams sectionParams = new LinearLayout.LayoutParams(
+                Theme.dp(this, 96), Theme.dp(this, 18));
+        sectionParams.topMargin = Theme.dp(this, 24);
+        box.addView(section, sectionParams);
+
+        for (int row = 0; row < 2; row++) {
+            LinearLayout line = new LinearLayout(this);
+            line.setOrientation(LinearLayout.HORIZONTAL);
+            LinearLayout.LayoutParams lineParams = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            lineParams.topMargin = Theme.dp(this, 16);
+            box.addView(line, lineParams);
+            for (int col = 0; col < 2; col++) {
+                if (col == 1) {
+                    View gap = new View(this);
+                    line.addView(gap, new LinearLayout.LayoutParams(Theme.dp(this, 12), 1));
+                }
+                SkeletonView cell = new SkeletonView(this);
+                line.addView(cell, new LinearLayout.LayoutParams(0,
+                        Theme.dp(this, 200), 1));
+            }
+        }
+        return box;
+    }
+
+    private View buildError() {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setGravity(Gravity.CENTER);
+        box.setBackgroundColor(Theme.BG);
+        box.setPadding(Theme.dp(this, 32), 0, Theme.dp(this, 32), 0);
+
+        TextView glyph = new TextView(this);
+        glyph.setText("! ");
+        glyph.setTextColor(Theme.DANGER);
+        glyph.setTypeface(Theme.display());
+        glyph.setTextSize(TypedValue.COMPLEX_UNIT_SP, 34);
+        box.addView(glyph);
+
+        TextView title = new TextView(this);
+        title.setText("内容加载失败");
+        title.setTextColor(Theme.TEXT);
+        title.setTypeface(Theme.medium());
+        title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+        LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        titleParams.topMargin = Theme.dp(this, 10);
+        box.addView(title, titleParams);
+
+        errorText = new TextView(this);
+        errorText.setTextColor(Theme.TEXT_MUTED);
+        errorText.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        errorText.setGravity(Gravity.CENTER);
+        errorText.setMaxLines(4);
+        LinearLayout.LayoutParams textParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        textParams.topMargin = Theme.dp(this, 8);
+        box.addView(errorText, textParams);
+
+        TextView retry = new TextView(this);
+        retry.setText("重新加载");
+        retry.setTextColor(Color.WHITE);
+        retry.setTypeface(Theme.medium());
+        retry.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        retry.setGravity(Gravity.CENTER);
+        retry.setPadding(Theme.dp(this, 26), Theme.dp(this, 10),
+                Theme.dp(this, 26), Theme.dp(this, 10));
+        retry.setBackground(Theme.gradient(24, this, Theme.ACCENT, 0xFFB45CFF));
+        LinearLayout.LayoutParams retryParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        retryParams.topMargin = Theme.dp(this, 20);
+        box.addView(retry, retryParams);
+        retry.setOnClickListener(v -> load());
+        return box;
     }
 
     private void load() {
-        refresh.setEnabled(false);
-        status.setText("正在解析 endpoint 与 bootstrap...");
+        refreshLayout.setEnabled(false);
+        if (!loaded) {
+            skeleton.setVisibility(View.VISIBLE);
+            errorBox.setVisibility(View.GONE);
+            Theme.fadeIn(skeleton);
+        }
         new Thread(() -> {
             try {
                 Session session = Session.init(getApplicationContext());
-                runOnUiThread(() -> status.setText(
-                        "已连接 " + session.api.getCurrentBaseUrl() + "，正在加载首页..."));
                 List<VideoItem> loaded = HomeRepository.load(session.api);
                 runOnUiThread(() -> {
-                    items.clear();
-                    items.addAll(loaded);
-                    adapter.notifyDataSetChanged();
-                    status.setText("共 " + items.size() + " 部影视 · "
-                            + session.api.getCurrentBaseUrl());
-                    refresh.setEnabled(true);
+                    adapter.setItems(loaded);
+                    this.loaded = true;
+                    skeleton.setVisibility(View.GONE);
+                    errorBox.setVisibility(View.GONE);
+                    refreshLayout.setEnabled(true);
+                    refreshLayout.finish();
                 });
-            } catch (Exception e) {
-                Log.e(TAG, "load failed", e);
+            } catch (Exception error) {
                 runOnUiThread(() -> {
-                    status.setText("加载失败: " + errorText(e));
-                    refresh.setEnabled(true);
+                    skeleton.setVisibility(View.GONE);
+                    refreshLayout.finish();
+                    refreshLayout.setEnabled(true);
+                    errorText.setText(errorText(error));
+                    errorBox.setVisibility(View.VISIBLE);
+                    Theme.fadeIn(errorBox);
                 });
             }
         }, "jcy-home").start();
     }
 
-    private void loadAdConfig() {
-        adConfig.setEnabled(false);
-        status.setText("正在读取广告配置...");
-        new Thread(() -> {
-            try {
-                Session session = Session.init(getApplicationContext());
-                JSONObject body = new JSONObject();
-                body.put("slotCode", JSONObject.NULL);
-                JSONObject data = session.api.post("/api/v1/app/client/ad/getSlots", body);
-                String text = data.toString(2);
-                runOnUiThread(() -> {
-                    status.setText("广告配置已返回");
-                    showTextDialog("广告配置", text);
-                    adConfig.setEnabled(true);
-                });
-            } catch (Exception e) {
-                Log.e(TAG, "ad config failed", e);
-                runOnUiThread(() -> {
-                    status.setText("广告配置失败: " + errorText(e));
-                    adConfig.setEnabled(true);
-                });
-            }
-        }, "jcy-ad-config").start();
-    }
-
-    private void showTextDialog(String title, String text) {
-        TextView content = new TextView(this);
-        content.setText(text);
-        content.setTextIsSelectable(true);
-        content.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-        content.setPadding(dp(16), dp(12), dp(16), dp(12));
-        ScrollView scroll = new ScrollView(this);
-        scroll.addView(content);
-        new AlertDialog.Builder(this)
-                .setTitle(title)
-                .setView(scroll)
-                .setPositiveButton("关闭", null)
-                .show();
+    private void openPlayer(VideoItem item) {
+        Intent intent = new Intent(this, PlayerActivity.class);
+        intent.putExtra("videoId", item.id);
+        intent.putExtra("title", item.title);
+        intent.putExtra("cover", item.coverUrl);
+        startActivity(intent);
+        overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out);
     }
 
     private static String errorText(Throwable error) {
@@ -164,7 +282,7 @@ public final class MainActivity extends Activity {
         Throwable current = error;
         while (current != null) {
             if (out.length() > 0) {
-                out.append(" <- ");
+                out.append("\n");
             }
             out.append(current.getClass().getSimpleName()).append(": ")
                     .append(current.getMessage());
@@ -173,8 +291,29 @@ public final class MainActivity extends Activity {
         return out.toString();
     }
 
-    private int dp(int value) {
-        return (int) (value * getResources().getDisplayMetrics().density + 0.5f);
+    private static int withAlpha(int color, float alpha) {
+        int a = Math.round(alpha * 255);
+        return (a << 24) | (color & 0x00FFFFFF);
+    }
+
+    private int navBar() {
+        return Theme.navigationBarHeight(this);
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (adapter != null && adapter.hero() != null) {
+            adapter.hero().resume();
+        }
+    }
+
+    @Override
+    protected void onPause() {
+        if (adapter != null && adapter.hero() != null) {
+            adapter.hero().pause();
+        }
+        super.onPause();
     }
 
     @Override
@@ -183,69 +322,5 @@ public final class MainActivity extends Activity {
             imageLoader.shutdown();
         }
         super.onDestroy();
-    }
-
-    private final class VideoAdapter extends BaseAdapter {
-        @Override
-        public int getCount() {
-            return items.size();
-        }
-
-        @Override
-        public Object getItem(int position) {
-            return items.get(position);
-        }
-
-        @Override
-        public long getItemId(int position) {
-            return position;
-        }
-
-        @Override
-        public View getView(int position, View convertView, ViewGroup parent) {
-            VideoItem item = items.get(position);
-
-            LinearLayout row = new LinearLayout(MainActivity.this);
-            row.setOrientation(LinearLayout.HORIZONTAL);
-            row.setPadding(0, dp(8), 0, dp(8));
-            row.setGravity(Gravity.CENTER_VERTICAL);
-
-            ImageView cover = new ImageView(MainActivity.this);
-            cover.setScaleType(ImageView.ScaleType.CENTER_CROP);
-            cover.setBackgroundColor(Color.rgb(0xEE, 0xEE, 0xEE));
-            row.addView(cover, new LinearLayout.LayoutParams(dp(84), dp(116)));
-
-            LinearLayout info = new LinearLayout(MainActivity.this);
-            info.setOrientation(LinearLayout.VERTICAL);
-            info.setPadding(dp(12), 0, 0, 0);
-            row.addView(info, new LinearLayout.LayoutParams(0,
-                    ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-
-            TextView name = new TextView(MainActivity.this);
-            name.setText(item.title);
-            name.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
-            name.setTextColor(Color.BLACK);
-            name.setSingleLine(true);
-            name.setEllipsize(TextUtils.TruncateAt.END);
-            info.addView(name);
-
-            TextView subtitle = new TextView(MainActivity.this);
-            subtitle.setText(item.subTitle);
-            subtitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-            subtitle.setTextColor(Color.rgb(0x66, 0x66, 0x66));
-            subtitle.setSingleLine(true);
-            subtitle.setEllipsize(TextUtils.TruncateAt.END);
-            info.addView(subtitle);
-
-            TextView episode = new TextView(MainActivity.this);
-            episode.setText(item.episodeText()
-                    + (item.score > 0 ? "  ·  " + item.score + " 分" : ""));
-            episode.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-            episode.setTextColor(Color.rgb(0x99, 0x66, 0x00));
-            info.addView(episode);
-
-            imageLoader.load(item.coverUrl, cover);
-            return row;
-        }
     }
 }

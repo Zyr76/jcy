@@ -13,7 +13,7 @@ import java.util.concurrent.Executors;
 
 public final class ImageLoader {
     private final ExecutorService executor = Executors.newFixedThreadPool(4);
-    private final LruCache<String, Bitmap> cache = new LruCache<String, Bitmap>(8 * 1024 * 1024) {
+    private final LruCache<String, Bitmap> cache = new LruCache<String, Bitmap>(12 * 1024 * 1024) {
         @Override
         protected int sizeOf(String key, Bitmap value) {
             return value.getByteCount();
@@ -21,13 +21,24 @@ public final class ImageLoader {
     };
 
     public void load(String url, ImageView view) {
+        load(url, view, null);
+    }
+
+    public void load(String url, ImageView view, Runnable onLoaded) {
         if (url == null || url.isEmpty()) {
             view.setImageDrawable(null);
+            if (onLoaded != null) {
+                view.post(onLoaded);
+            }
             return;
         }
         Bitmap cached = cache.get(url);
         if (cached != null) {
+            view.setTag(url);
             view.setImageBitmap(cached);
+            if (onLoaded != null) {
+                view.post(onLoaded);
+            }
             return;
         }
         view.setTag(url);
@@ -40,6 +51,11 @@ public final class ImageLoader {
             view.post(() -> {
                 if (url.equals(view.getTag()) && bitmap != null) {
                     view.setImageBitmap(bitmap);
+                    view.setAlpha(0f);
+                    view.animate().alpha(1f).setDuration(240).start();
+                }
+                if (onLoaded != null) {
+                    onLoaded.run();
                 }
             });
         });

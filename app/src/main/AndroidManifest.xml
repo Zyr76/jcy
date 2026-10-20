@@ -7,14 +7,19 @@
     <application
         android:allowBackup="false"
         android:extractNativeLibs="true"
-        android:label="囧次元极简客户端"
-        android:usesCleartextTraffic="true"
-        android:theme="@android:style/Theme.Material.Light.NoActionBar">
+        android:hardwareAccelerated="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="囧次元"
+        android:roundIcon="@mipmap/ic_launcher"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.Jcy"
+        android:usesCleartextTraffic="true">
 
         <activity
             android:name=".MainActivity"
             android:configChanges="orientation|screenSize|keyboardHidden"
-            android:exported="true">
+            android:exported="true"
+            android:theme="@style/Theme.Jcy">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -23,7 +28,8 @@
 
         <activity
             android:name=".PlayerActivity"
-            android:configChanges="orientation|screenSize|keyboardHidden"
-            android:exported="false" />
+            android:configChanges="orientation|screenSize|keyboardHidden|smallestScreenSize"
+            android:exported="false"
+            android:theme="@style/Theme.Jcy.Player" />
     </application>
 </manifest>
