@@ -1,0 +1,109 @@
+import 'dart:convert';
+import 'dart:ffi';
+
+import 'package:ffi/ffi.dart';
+
+import 'crypto.dart';
+
+class ProbeResult {
+  ProbeResult(this.label, this.json);
+
+  final String label;
+  final Map<String, dynamic> json;
+}
+
+class Gateway {
+  static const loaderKey = 'kFGTbLlOzFHQCIKp';
+  static const loaderIv = 'F3q22XoM8l6T2Ydc';
+  static const coreKey = 'qPwClBj7j7ZQraSm';
+  static const coreIv = 'p3JdVQl3q7WQJIgG';
+
+  static final DynamicLibrary _loader = DynamicLibrary.open('libloader.so');
+  static final DynamicLibrary _core = DynamicLibrary.open('libcore.so');
+
+  static final _callLoader = _loader.lookupFunction<
+      Pointer<Utf8> Function(Pointer<Utf8>),
+      Pointer<Utf8> Function(Pointer<Utf8>)>('call');
+
+  static final _callCore = _core.lookupFunction<
+      Pointer<Utf8> Function(Pointer<Utf8>),
+      Pointer<Utf8> Function(Pointer<Utf8>)>('call');
+
+  static final _init = _loader.lookupFunction<
+      Void Function(Pointer<Utf8>),
+      void Function(Pointer<Utf8>)>('init');
+
+  static Map<String, dynamic> throughLoader(String action,
+          {Map<String, dynamic>? extra}) =>
+      _invoke(_callLoader, action, loaderKey, loaderIv, extra);
+
+  static Map<String, dynamic> throughCore(String action,
+          {Map<String, dynamic>? extra}) =>
+      _invoke(_callCore, action, coreKey, coreIv, extra);
+
+  static Map<String, dynamic> _invoke(
+    Pointer<Utf8> Function(Pointer<Utf8>) fn,
+    String action,
+    String key,
+    String iv, [
+    Map<String, dynamic>? extra,
+  ]) {
+    final request = <String, dynamic>{'action': action, ...?extra};
+    final plain = jsonEncode(request);
+    final cipher = base64.encode(AesCbc.encrypt(plain, key, iv));
+    final pointer = cipher.toNativeUtf8();
+    Pointer<Utf8> response;
+    try {
+      response = fn(pointer);
+    } finally {
+      malloc.free(pointer);
+    }
+    if (response == nullptr) {
+      return {
+        'request': request,
+        'error': 'native 返回空指针',
+      };
+    }
+    final raw = response.toDartString();
+    malloc.free(response);
+    try {
+      final decrypted = AesCbc.decrypt(raw, key, iv);
+      return {
+        'request': request,
+        'request_cipher': cipher,
+        'response_raw': raw,
+        'response': jsonDecode(decrypted),
+      };
+    } catch (error) {
+      return {
+        'request': request,
+        'request_cipher': cipher,
+        'response_raw': raw,
+        'decrypt_error': error.toString(),
+      };
+    }
+  }
+
+  static Map<String, dynamic> init({
+    required Map<String, dynamic> appInfo,
+    required Map<String, dynamic> hostConfig,
+    required String filesPath,
+  }) {
+    final payload = {
+      'app_id': appInfo['app_id'] ?? '',
+      'device_id': appInfo['device_id'] ?? '',
+      'code_version': appInfo['code_version'] ?? '',
+      'app_version': appInfo['app_version'] ?? '',
+      'files_path': filesPath,
+      'tcp': hostConfig['tcp'] ?? '',
+    };
+    final plain = jsonEncode(payload);
+    final pointer = plain.toNativeUtf8();
+    try {
+      _init(pointer);
+    } finally {
+      malloc.free(pointer);
+    }
+    return {'request': payload};
+  }
+}
