@@ -159,19 +159,47 @@ object ResolveRepository {
         }
     }
 
-        /** 免广告换取播放地址：getConfig->claimReward 拿 adToken，再 exchange。 */
-    fun exchange(deviceId: String, videoId: String, code: String, episodeNum: Int, quality: String, exchangeToken: String): Pair<String?, String> {
+        /**
+     * 完整解析播放地址（复刻官方 Lua 解析逻辑）：
+     * exchange -> originalUrl；sign(get_api_url) -> 上游 api_url+headers；
+     * httpGet -> 密文；sign(decrypt_response) -> 播放 url。
+     */
+    fun resolvePlayUrl(deviceId: String, videoId: String, code: String, episodeNum: Int): Pair<String?, String> {
+        val (et, q) = qualities(deviceId, videoId, code, episodeNum)
+        if (et.isEmpty()) return Pair(null, "qualities 无 exchangeToken")
         val adToken = runCatching { claimAdToken(deviceId, "player_pre_roll") }.getOrNull()
-        val body = """{"videoId":"$videoId","code":"$code","episodeNum":$episodeNum,"quality":"$quality","adToken":${if (adToken == null) "null" else "\"$adToken\""},"adSignature":"","exchangeToken":"$exchangeToken"}"""
-        val resp = SecureApi.postEncrypted(Config.PATH_RESOLVE_EXCHANGE, body, deviceId)
-        val root = json.parseToJsonElement(resp).jsonObject
-        val data = root["data"]?.jsonObject ?: root
-        val direct = str(data, "playUrl", "url")
-        if (direct.startsWith("http")) return Pair(direct, "")
-        val msg = str(root, "msg")
-        val clientParse = data["isClientParse"]?.jsonPrimitive?.booleanOrNull == true
-        val orig = str(data, "originalUrl")
-        return Pair(null, if (clientParse) "客户端解析模式(需Lua): orig=$orig" else msg)
+        val exBody = """{"videoId":"$videoId","code":"$code","episodeNum":$episodeNum,"quality":"$q","adToken":${if (adToken == null) "null" else "\"$adToken\""},"adSignature":"","exchangeToken":"$et"}"""
+        val exResp = SecureApi.postEncrypted(Config.PATH_RESOLVE_EXCHANGE, exBody, deviceId, adToken)
+        val exData = json.parseToJsonElement(exResp).jsonObject.let { it["data"]?.jsonObject ?: it }
+        str(exData, "playUrl", "url").takeIf { it.startsWith("http") }?.let { return Pair(it, "") }
+        val orig = str(exData, "originalUrl")
+        if (orig.isEmpty()) return Pair(null, str(json.parseToJsonElement(exResp).jsonObject, "msg"))
+        // 1) get_api_url
+        val s1 = sign(deviceId, code, episodeNum, "get_api_url", """{"url":"$orig"}""", adToken)
+        val signObj = json.parseToJsonElement(s1).jsonObject.let { it["data"]?.jsonObject ?: it }["sign"]?.jsonObject
+            ?: return Pair(null, "sign(get_api_url) 无结果: $s1")
+        val apiUrl = str(signObj, "api_url").replace("\\u0026", "&")
+        val headers = signObj["headers"]?.jsonObject
+        if (apiUrl.isEmpty()) return Pair(null, "api_url empty")
+        // 2) httpGet
+        val up = okhttp3.OkHttpClient.Builder().build()
+        val reqB = okhttp3.Request.Builder().url(apiUrl)
+        headers?.forEach { (k, v) -> runCatching { reqB.header(k, v.jsonPrimitive.contentOrNull ?: "") } }
+        val raw = up.newCall(reqB.build()).execute().use { it.body?.string().orEmpty() }
+        if (raw.isEmpty()) return Pair(null, "upstream empty")
+        // 3) 若已是 JSON 直接用，否则 decrypt_response
+        val plain = if (raw.trimStart().startsWith("{")) raw
+        else sign(deviceId, code, episodeNum, "decrypt_response", kotlinx.serialization.json.JsonPrimitive(raw).toString(), adToken)
+        val pj = json.parseToJsonElement(plain).jsonObject
+        val pd = pj["data"]?.jsonObject ?: pj
+        val sign = pd["sign"]?.jsonObject
+        val url = sign?.let { str(it, "url") } ?: str(pd, "url")
+        return if (url.startsWith("http")) Pair(url, "") else Pair(null, "解析失败: ${plain.take(200)}")
+    }
+
+    private fun sign(deviceId: String, code: String, episodeNum: Int, action: String, paramsJson: String, adToken: String?): String {
+        val body = """{"code":"$code","episodeNum":$episodeNum,"action":"$action","params":$paramsJson}"""
+        return SecureApi.postEncrypted(Config.PATH_RESOLVE_SIGN, body, deviceId, adToken)
     }
 
     /** 免广告获取 adToken（getConfig 的 nonce -> claimReward）。 */

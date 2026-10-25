@@ -69,8 +69,7 @@ class PlayerActivity : AppCompatActivity() {
                     val code = detail.players.firstOrNull()?.first ?: "mp4"
                     val eps = com.jcy.client.net.ResolveRepository.episodes(deviceId, videoId, code)
                     val ep = eps.firstOrNull()?.num ?: 1
-                    val (et, q) = com.jcy.client.net.ResolveRepository.qualities(deviceId, videoId, code, ep)
-                    val (url, msg) = com.jcy.client.net.ResolveRepository.exchange(deviceId, videoId, code, ep, q, et)
+                    val (url, msg) = com.jcy.client.net.ResolveRepository.resolvePlayUrl(deviceId, videoId, code, ep)
                     Triple(detail, url, msg)
                 }
             }

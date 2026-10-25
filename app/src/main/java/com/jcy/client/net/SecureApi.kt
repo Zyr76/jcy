@@ -100,7 +100,7 @@ object SecureApi {
     }
 
     /** POST 加密 JSON，返回解密后的 JSON 字符串。 */
-    fun postEncrypted(path: String, bodyJson: String, deviceId: String): String {
+    fun postEncrypted(path: String, bodyJson: String, deviceId: String, adSignature: String? = null): String {
         val s = ensureSession(deviceId)
         val cipher = s.biz.encryptText(bodyJson)
         val req = Request.Builder()
@@ -110,6 +110,7 @@ object SecureApi {
             .header("X-App-Id", Config.API_APP_ID)
             .header("X-Key-Version", s.device.keyVersion.toString())
             .header("X-Device-Id", deviceId)
+            .apply { if (!adSignature.isNullOrEmpty()) header("X-Ad-Signature", adSignature) }
             .build()
         http.newCall(req).execute().use { resp ->
             val raw = resp.body?.bytes() ?: ByteArray(0)
