@@ -49,5 +49,9 @@ class MagicFingerprintLib private constructor() {
         @JvmStatic external fun nativeBootstrapDeriveCandidateKeys(p0: ByteArray, p1: ByteArray, p2: ByteArray, p3: ByteArray, appId: String, timestamp: Long): ByteArray
 
         @JvmStatic external fun nativeBootstrapAssembleVersion(payloadV: ByteArray): Int
+
+        @JvmStatic external fun maesProcess(k1: ByteArray, k2: ByteArray, data: ByteArray, encrypt: Boolean): ByteArray
+
+        @JvmStatic external fun mbase64Process(table: ByteArray, data: ByteArray, encrypt: Boolean): ByteArray
     }
 }

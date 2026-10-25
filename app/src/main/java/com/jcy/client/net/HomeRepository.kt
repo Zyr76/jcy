@@ -179,7 +179,8 @@ object ResolveRepository {
         val orig = str(exData, "originalUrl")
         if (orig.isEmpty()) return Pair(null, str(json.parseToJsonElement(exResp).jsonObject, "msg"))
         // 1) get_api_url
-        val s1 = sign(deviceId, code, episodeNum, "get_api_url", """{"url":"$orig"}""", adToken)
+        // 官方上游 url 参数是裸值：url=<originalUrl>&t=<ts>，因此 params 必须传字符串
+        val s1 = sign(deviceId, code, episodeNum, "get_api_url", kotlinx.serialization.json.JsonPrimitive(orig).toString(), adToken)
         val signObj = json.parseToJsonElement(s1).jsonObject.let { it["data"]?.jsonObject ?: it }["sign"]?.jsonObject
             ?: return Pair(null, "sign(get_api_url) 无结果: $s1")
         val apiUrl = str(signObj, "api_url").replace("\\u0026", "&")
