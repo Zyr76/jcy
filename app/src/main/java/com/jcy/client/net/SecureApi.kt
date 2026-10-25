@@ -156,6 +156,7 @@ object SecureApi {
         b.header("X-App-Id", Config.API_APP_ID)
         b.header("X-Key-Version", s.device.keyVersion.toString())
         b.header("X-Device-Id", deviceId)
+        com.jcy.client.Session.token?.let { if (it.isNotEmpty()) b.header("Authorization", "Bearer $it") }
         if (!adSignature.isNullOrEmpty()) b.header("X-Ad-Signature", adSignature)
         // 请求签名：md5(ts + nonce + appId + signSecret)
         val signSecret = s.bootstrap.signSecret.orEmpty()
@@ -186,6 +187,105 @@ object SecureApi {
     private fun md5(s: String): String {
         val d = java.security.MessageDigest.getInstance("MD5").digest(s.toByteArray(Charsets.UTF_8))
         val sb = StringBuilder(); for (b in d) sb.append(String.format("%02x", b.toInt() and 0xFF)); return sb.toString()
+    }
+
+    // ---------------- 账号 ----------------
+    data class LoginResult(val ok: Boolean, val token: String? = null, val user: com.jcy.client.Session.User? = null, val message: String? = null)
+
+    private fun plainOrDecrypt(s: Session, raw: ByteArray): String {
+        if (raw.isEmpty()) return ""
+        return if ((raw.first().toInt() and 0xFF) == 123 || raw.first().toInt() and 0xFF == 32) String(raw, Charsets.UTF_8)
+        else runCatching { s.biz.decryptText(raw) }.getOrElse { String(raw, Charsets.UTF_8) }
+    }
+
+    /** 登录：/auth/encryptKey(明文响应) -> RSA 加密密码 -> /auth/login */
+    fun login(account: String, password: String, deviceId: String): LoginResult {
+        val s = ensureSession(deviceId)
+        // 1) 取 RSA 公钥（响应为明文 JSON）
+        val ekReq = Request.Builder()
+            .url("${s.gateway}${Config.PATH_AUTH_ENCRYPT_KEY}?app_id=${Config.API_APP_ID}")
+            .post(s.biz.encryptText("""{"account":"$account"}""").toRequestBody(OCTET))
+            .header("User-Agent", UA).header("Content-Type", "application/octet-stream")
+            .header("X-Platform", Config.PLATFORM).header("X-App-Id", Config.API_APP_ID)
+            .header("X-Key-Version", s.device.keyVersion.toString())
+            .build()
+        val ek = http.newCall(ekReq).execute().use { r ->
+            val raw = r.body?.bytes() ?: ByteArray(0)
+            Log.i(TAG, "encryptKey http=${r.code} len=${raw.size}")
+            plainOrDecrypt(s, raw)
+        }
+        val pk = json.parseToJsonElement(ek).jsonObject.let { it["data"]?.jsonObject ?: it }["publicKey"]?.toString()?.trim('"')
+            ?: return LoginResult(false, message = "获取公钥失败: ${ek.take(120)}")
+        val encPwd = runCatching { rsaEncrypt(pk.replace("\\n", "\n"), password) }
+            .getOrElse { return LoginResult(false, message = "密码加密失败: ${it.message}") }
+        // 2) 登录
+        val body = """{"account":"$account","password":"$encPwd","deviceId":"$deviceId","deviceName":"${android.os.Build.BRAND} ${android.os.Build.MODEL}","accountType":null}"""
+        val lrReq = Request.Builder()
+            .url("${s.gateway}${Config.PATH_AUTH_LOGIN}?app_id=${Config.API_APP_ID}")
+            .post(s.biz.encryptText(body).toRequestBody(OCTET))
+            .header("User-Agent", UA).header("Content-Type", "application/octet-stream")
+            .header("X-Platform", Config.PLATFORM).header("X-App-Id", Config.API_APP_ID)
+            .header("X-Key-Version", s.device.keyVersion.toString())
+            .build()
+        val lt = http.newCall(lrReq).execute().use { r ->
+            val raw = r.body?.bytes() ?: ByteArray(0)
+            Log.i(TAG, "login http=${r.code} len=${raw.size}")
+            plainOrDecrypt(s, raw)
+        }
+        Log.i(TAG, "login -> ${lt.take(240)}")
+        val root = runCatching { json.parseToJsonElement(lt).jsonObject }.getOrElse {
+            return LoginResult(false, message = "响应解析失败: ${lt.take(120)}")
+        }
+        val code = root["code"]?.jsonPrimitive?.intOrNull ?: -1
+        if (code != 200) return LoginResult(false, message = "code=$code ${root["msg"]?.toString()?.trim('"').orEmpty()}")
+        val d = root["data"]?.jsonObject ?: return LoginResult(false, message = "无 data")
+        val tk = d["token"]?.toString()?.trim('"') ?: return LoginResult(false, message = "无 token")
+        val u = d["user"]?.jsonObject
+        val user = com.jcy.client.Session.User(
+            id = u?.get("id")?.toString()?.trim('"').orEmpty(),
+            name = u?.get("name")?.toString()?.trim('"').orEmpty(),
+            email = u?.get("email")?.toString()?.trim('"').orEmpty(),
+            avatar = u?.get("pic")?.toString()?.trim('"').orEmpty(),
+            vipLevel = runCatching { u?.get("vipLevel")?.jsonPrimitive?.intOrNull ?: 0 }.getOrDefault(0),
+        )
+        return LoginResult(true, tk, user)
+    }
+
+    /** 注册（沿用 login 的 RSA 流程，字段按官方 RegisterApiRequest）。 */
+    fun register(account: String, password: String, deviceId: String): LoginResult {
+        val s = ensureSession(deviceId)
+        val ek = http.newCall(
+            Request.Builder().url("${s.gateway}${Config.PATH_AUTH_ENCRYPT_KEY}?app_id=${Config.API_APP_ID}")
+                .post(s.biz.encryptText("""{"account":"$account"}""").toRequestBody(OCTET))
+                .header("User-Agent", UA).header("Content-Type", "application/octet-stream")
+                .header("X-Platform", Config.PLATFORM).header("X-App-Id", Config.API_APP_ID)
+                .header("X-Key-Version", s.device.keyVersion.toString()).build()
+        ).execute().use { r -> plainOrDecrypt(s, r.body?.bytes() ?: ByteArray(0)) }
+        val pk = json.parseToJsonElement(ek).jsonObject.let { it["data"]?.jsonObject ?: it }["publicKey"]?.toString()?.trim('"')
+            ?: return LoginResult(false, message = "获取公钥失败")
+        val encPwd = rsaEncrypt(pk.replace("\\n", "\n"), password)
+        val body = """{"account":"$account","password":"$encPwd","deviceId":"$deviceId","deviceName":"${android.os.Build.BRAND} ${android.os.Build.MODEL}","accountType":null}"""
+        val rt = http.newCall(
+            Request.Builder().url("${s.gateway}${Config.PATH_AUTH_REGISTER}?app_id=${Config.API_APP_ID}")
+                .post(s.biz.encryptText(body).toRequestBody(OCTET))
+                .header("User-Agent", UA).header("Content-Type", "application/octet-stream")
+                .header("X-Platform", Config.PLATFORM).header("X-App-Id", Config.API_APP_ID)
+                .header("X-Key-Version", s.device.keyVersion.toString()).build()
+        ).execute().use { r -> plainOrDecrypt(s, r.body?.bytes() ?: ByteArray(0)) }
+        Log.i(TAG, "register -> ${rt.take(240)}")
+        val root = runCatching { json.parseToJsonElement(rt).jsonObject }.getOrElse { return LoginResult(false, message = rt.take(120)) }
+        val code = root["code"]?.jsonPrimitive?.intOrNull ?: -1
+        if (code != 200) return LoginResult(false, message = "code=$code ${root["msg"]?.toString()?.trim('"').orEmpty()}")
+        return LoginResult(true, message = "注册成功，请登录")
+    }
+
+    private fun rsaEncrypt(pem: String, plain: String): String {
+        val b64 = pem.replace("-----BEGIN PUBLIC KEY-----", "").replace("-----END PUBLIC KEY-----", "").replace("\\s".toRegex(), "")
+        val der = android.util.Base64.decode(b64, android.util.Base64.DEFAULT)
+        val pub = java.security.KeyFactory.getInstance("RSA").generatePublic(java.security.spec.X509EncodedKeySpec(der))
+        val c = javax.crypto.Cipher.getInstance("RSA/ECB/PKCS1Padding")
+        c.init(javax.crypto.Cipher.ENCRYPT_MODE, pub)
+        return android.util.Base64.encodeToString(c.doFinal(plain.toByteArray()), android.util.Base64.NO_WRAP)
     }
 
     fun reset() { session = null }

@@ -10,6 +10,7 @@ class JcyApp : Application() {
         super.onCreate()
         instance = this
         runCatching { Bootstrap.initNativeSdk() }
+        runCatching { Session.restore(this) }
     }
 
     companion object {

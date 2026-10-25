@@ -255,3 +255,93 @@ object ResolveRepository {
         return m?.value
     }
 }
+
+// ---------------- 首页轮播 / 评论 / 弹幕 ----------------
+
+data class BannerItem(val id: String, val title: String, val imageUrl: String, val videoId: String)
+
+data class CommentItem(
+    val id: String, val nickname: String, val avatar: String, val content: String,
+    val likeCount: Int, val replyCount: Int, val createdAt: Long, val isTop: Boolean,
+)
+
+data class DanmakuItem(val timeMs: Long, val text: String, val color: String, val fontSize: Int, val type: Int)
+
+/** 首页轮播（banner/list，明文接口）。 */
+object BannerRepository {
+    private val json = Json { ignoreUnknownKeys = true; isLenient = true }
+
+    fun list(deviceId: String): List<BannerItem> {
+        val resp = SecureApi.postEncrypted(Config.PATH_BANNER_LIST, "{}", deviceId)
+        val root = json.parseToJsonElement(resp).jsonObject
+        val data = root["data"]?.jsonObject ?: root
+        val arr = data["banners"]?.jsonArray ?: return emptyList()
+        return arr.mapNotNull { el ->
+            runCatching {
+                val o = el.jsonObject
+                BannerItem(
+                    id = str(o, "id"),
+                    title = str(o, "title"),
+                    imageUrl = str(o, "imageUrl"),
+                    videoId = str(o, "linkId"),
+                )
+            }.getOrNull()
+        }.filter { it.imageUrl.isNotEmpty() }
+    }
+
+    private fun str(o: kotlinx.serialization.json.JsonObject, k: String): String =
+        o[k]?.jsonPrimitive?.contentOrNull ?: ""
+}
+
+/** 评论/讨论 + 弹幕。 */
+object CommunityRepository {
+    private val json = Json { ignoreUnknownKeys = true; isLenient = true }
+
+    private fun str(o: kotlinx.serialization.json.JsonObject, vararg keys: String): String {
+        for (k in keys) o[k]?.jsonPrimitive?.contentOrNull?.let { if (it.isNotEmpty()) return it }
+        return ""
+    }
+
+    fun comments(deviceId: String, videoId: String, pageIndex: Int = 1, pageSize: Int = 20): List<CommentItem> {
+        val body = """{"videoId":"$videoId","pageIndex":$pageIndex,"pageSize":$pageSize}"""
+        val resp = SecureApi.postEncrypted(Config.PATH_COMMENT_LIST, body, deviceId)
+        val root = json.parseToJsonElement(resp).jsonObject
+        val data = root["data"]?.jsonObject ?: root
+        val arr = data["comments"]?.jsonArray ?: return emptyList()
+        return arr.mapNotNull { el ->
+            runCatching {
+                val o = el.jsonObject
+                CommentItem(
+                    id = str(o, "id"),
+                    nickname = str(o, "userNickname"),
+                    avatar = str(o, "userAvatar"),
+                    content = str(o, "content"),
+                    likeCount = o["likeCount"]?.jsonPrimitive?.intOrNull ?: 0,
+                    replyCount = o["replyCount"]?.jsonPrimitive?.intOrNull ?: 0,
+                    createdAt = o["createdAt"]?.jsonPrimitive?.longOrNull ?: 0L,
+                    isTop = (o["isTop"]?.jsonPrimitive?.intOrNull ?: 0) == 1,
+                )
+            }.getOrNull()
+        }
+    }
+
+    fun danmaku(deviceId: String, videoId: String, episodeNum: Int): List<DanmakuItem> {
+        val body = """{"videoId":"$videoId","episodeNum":$episodeNum}"""
+        val resp = SecureApi.postEncrypted(Config.PATH_COMMENT_DANMAKU, body, deviceId)
+        val root = json.parseToJsonElement(resp).jsonObject
+        val data = root["data"]?.jsonObject ?: root
+        val arr = data["list"]?.jsonArray ?: return emptyList()
+        return arr.mapNotNull { el ->
+            runCatching {
+                val o = el.jsonObject
+                DanmakuItem(
+                    timeMs = (o["time"]?.jsonPrimitive?.longOrNull ?: 0L) * 1000L,
+                    text = str(o, "text"),
+                    color = str(o, "color").ifEmpty { "#FFFFFF" },
+                    fontSize = o["fontSize"]?.jsonPrimitive?.intOrNull ?: 25,
+                    type = o["type"]?.jsonPrimitive?.intOrNull ?: 0,
+                )
+            }.getOrNull()
+        }.filter { it.text.isNotEmpty() }
+    }
+}

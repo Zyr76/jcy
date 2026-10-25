@@ -45,6 +45,14 @@ object Config {
     const val PATH_RESOLVE_EXCHANGE = "/api/v1/app/client/resolve/exchange"
     const val PATH_AD_GET_CONFIG = "/api/v1/app/client/ad/getConfig"
     const val PATH_AD_CLAIM_REWARD = "/api/v1/app/client/ad/claimReward"
+    const val PATH_BANNER_LIST = "/api/v1/app/client/banner/list"
+    const val PATH_COMMENT_LIST = "/api/v1/app/client/comment/list"
+    const val PATH_COMMENT_DANMAKU = "/api/v1/app/client/comment/danmaku"
+    const val PATH_REVIEW_LIST = "/api/v1/app/client/review/list"
+    const val PATH_REVIEW_SUMMARY = "/api/v1/app/client/review/summary"
+    const val PATH_AUTH_ENCRYPT_KEY = "/api/v1/app/client/auth/encryptKey"
+    const val PATH_AUTH_LOGIN = "/api/v1/app/client/auth/login"
+    const val PATH_AUTH_REGISTER = "/api/v1/app/client/auth/register"
 
     const val PLATFORM = "android"
 }
