@@ -72,7 +72,10 @@ object Bootstrap {
         val sv = assembleVersion()
         val nowSec = System.currentTimeMillis() / 1000
         val url = "$gateway${Config.PATH_BOOTSTRAP_PNG}?appId=${Config.API_APP_ID}&sv=$sv&_t=$nowSec"
-        val req = Request.Builder().url(url).get().build()
+        val req = Request.Builder().url(url)
+            .header("X-Platform", Config.PLATFORM)
+            .header("X-App-Id", Config.API_APP_ID)
+            .get().build()
         val bytes = http.newCall(req).execute().use { resp ->
             check(resp.isSuccessful) { "bootstrap http ${resp.code}" }
             resp.body!!.bytes()

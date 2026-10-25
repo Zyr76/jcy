@@ -64,16 +64,24 @@ class PlayerActivity : AppCompatActivity() {
         lifecycleScope.launch {
             val deviceId = JcyApp.deviceId(this@PlayerActivity)
             val result = withContext(Dispatchers.IO) {
-                runCatching { HomeRepository.videoDetail(deviceId, videoId) }
+                runCatching {
+                    val detail = HomeRepository.videoDetail(deviceId, videoId)
+                    val code = detail.players.firstOrNull()?.first ?: "mp4"
+                    val eps = com.jcy.client.net.ResolveRepository.episodes(deviceId, videoId, code)
+                    val ep = eps.firstOrNull()?.num ?: 1
+                    val (et, q) = com.jcy.client.net.ResolveRepository.qualities(deviceId, videoId, code, ep)
+                    val (url, msg) = com.jcy.client.net.ResolveRepository.exchange(deviceId, videoId, code, ep, q, et)
+                    Triple(detail, url, msg)
+                }
             }
             progress.visibility = ProgressBar.GONE
-            result.onSuccess { detail ->
-                if (detail.sources.isEmpty()) {
-                    status.text = "未解析到播放源\n（可能要求登录或加密链路未完成）"
+            result.onSuccess { (detail, url, msg) ->
+                if (url == null) {
+                    status.text = "未取到播放地址：$msg\n（该内容可能需要广告凭证或登录）"
                     return@onSuccess
                 }
                 status.visibility = android.view.View.GONE
-                play(detail.sources.first())
+                play(com.jcy.client.net.PlaySource("line", url))
             }.onFailure { e ->
                 status.text = "解析失败：${e.message}"
             }

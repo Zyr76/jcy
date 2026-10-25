@@ -24,7 +24,8 @@ object Config {
     )
 
     // nativeSdkInit 参数（算法链）：XOR(8) RC4(16) Base64(0) TEA(16) ChaCha20(44) Blowfish(16)
-    val ALGO_IDS = byteArrayOf(1, 2, 3, 4, 5, 6)
+    // 算法 id = xor(sha256("EncryptionSDK." + name + "." + keyLength)) 的低字节（官方 RegistryKt.computeFingerprint）
+    val ALGO_IDS = byteArrayOf(0xe4.toByte(), 0x19, 0x82.toByte(), 0x9a.toByte(), 0x3b, 0x75)
     val MC_ALGO_IDS = byteArrayOf(1, 2, 3, 4, 5, 6)
     val KEY_LENGTHS = shortArrayOf(8, 16, 0, 16, 44, 16)
     // Vault 15/16 解密结果
@@ -38,6 +39,12 @@ object Config {
     const val PATH_VIDEO_MODULES = "/api/v1/app/client/video/modules"
     const val PATH_VIDEO_DETAIL = "/api/v1/app/client/video/detail"
     const val PATH_VIDEO_SEARCH = "/api/v1/app/client/video/search"
+    const val PATH_RESOLVE_EPISODES = "/api/v1/app/client/resolve/episodes"
+    const val PATH_RESOLVE_QUALITIES = "/api/v1/app/client/resolve/qualities"
+    const val PATH_RESOLVE_SIGN = "/api/v1/app/client/resolve/sign"
+    const val PATH_RESOLVE_EXCHANGE = "/api/v1/app/client/resolve/exchange"
+    const val PATH_AD_GET_CONFIG = "/api/v1/app/client/ad/getConfig"
+    const val PATH_AD_CLAIM_REWARD = "/api/v1/app/client/ad/claimReward"
 
     const val PLATFORM = "android"
 }

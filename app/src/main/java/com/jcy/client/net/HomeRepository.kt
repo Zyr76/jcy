@@ -32,6 +32,8 @@ data class VideoDetail(
     val description: String,
     /** 播放源列表：name -> url */
     val sources: List<PlaySource>,
+    /** 线路：playerCode -> playerName */
+    val players: List<Pair<String, String>> = emptyList(),
 )
 
 data class PlaySource(val name: String, val url: String, val quality: String = "")
@@ -99,12 +101,21 @@ object HomeRepository {
             }
         }
         collect(data)
+        val players = mutableListOf<Pair<String, String>>()
+        data["player"]?.jsonArray?.forEach { p ->
+            runCatching {
+                val po = p.jsonObject
+                val code = str(po, "playerCode")
+                if (code.isNotEmpty()) players.add(code to str(po, "playerName", "name"))
+            }
+        }
         return VideoDetail(
             id = str(data, "id", "videoId"),
-            name = str(data, "name", "title"),
+            name = str(data, "title", "name"),
             cover = str(data, "coverUrl", "cover"),
             description = str(data, "description", "desc"),
             sources = sources,
+            players = players,
         )
     }
 
@@ -115,5 +126,78 @@ object HomeRepository {
         val data = root["data"]?.jsonObject ?: root
         val arr = data["list"]?.jsonArray ?: data["items"]?.jsonArray ?: return emptyList()
         return arr.mapNotNull { runCatching { itemOf(it.jsonObject) }.getOrNull() }
+    }
+}
+
+/** 剧集与播放地址解析（resolve 系列接口）。 */
+object ResolveRepository {
+    private val json = Json { ignoreUnknownKeys = true; isLenient = true }
+
+    data class Episode(val num: Int, val name: String, val code: String, val isVip: Int)
+
+    private fun str(o: kotlinx.serialization.json.JsonObject, vararg keys: String): String {
+        for (k in keys) o[k]?.jsonPrimitive?.contentOrNull?.let { if (it.isNotEmpty()) return it }
+        return ""
+    }
+
+    fun episodes(deviceId: String, videoId: String, code: String): List<Episode> {
+        val body = """{"videoId":"$videoId","playerCode":"$code"}"""
+        val resp = SecureApi.postEncrypted(Config.PATH_RESOLVE_EPISODES, body, deviceId)
+        val root = json.parseToJsonElement(resp).jsonObject
+        val data = root["data"]?.jsonObject ?: root
+        val arr = data["episodes"]?.jsonArray ?: return emptyList()
+        return arr.mapNotNull { e ->
+            runCatching {
+                val o = e.jsonObject
+                Episode(
+                    num = o["episodeNum"]?.jsonPrimitive?.intOrNull ?: 0,
+                    name = str(o, "displayName", "episodeName"),
+                    code = str(o, "code"),
+                    isVip = o["isVip"]?.jsonPrimitive?.intOrNull ?: 0,
+                )
+            }.getOrNull()
+        }
+    }
+
+        /** 免广告换取播放地址：getConfig->claimReward 拿 adToken，再 exchange。 */
+    fun exchange(deviceId: String, videoId: String, code: String, episodeNum: Int, quality: String, exchangeToken: String): Pair<String?, String> {
+        val adToken = runCatching { claimAdToken(deviceId, "player_pre_roll") }.getOrNull()
+        val body = """{"videoId":"$videoId","code":"$code","episodeNum":$episodeNum,"quality":"$quality","adToken":${if (adToken == null) "null" else "\"$adToken\""},"adSignature":"","exchangeToken":"$exchangeToken"}"""
+        val resp = SecureApi.postEncrypted(Config.PATH_RESOLVE_EXCHANGE, body, deviceId)
+        val root = json.parseToJsonElement(resp).jsonObject
+        val data = root["data"]?.jsonObject ?: root
+        val direct = str(data, "playUrl", "url")
+        if (direct.startsWith("http")) return Pair(direct, "")
+        val msg = str(root, "msg")
+        val clientParse = data["isClientParse"]?.jsonPrimitive?.booleanOrNull == true
+        val orig = str(data, "originalUrl")
+        return Pair(null, if (clientParse) "客户端解析模式(需Lua): orig=$orig" else msg)
+    }
+
+    /** 免广告获取 adToken（getConfig 的 nonce -> claimReward）。 */
+    fun claimAdToken(deviceId: String, slotCode: String): String {
+        val cfg = SecureApi.postEncrypted(Config.PATH_AD_GET_CONFIG, """{"slotCode":"$slotCode"}""", deviceId)
+        val nonce = str(json.parseToJsonElement(cfg).jsonObject.let { (it["data"]?.jsonObject ?: it) }, "nonce")
+        require(nonce.isNotEmpty()) { "no nonce" }
+        val claim = SecureApi.postEncrypted(Config.PATH_AD_CLAIM_REWARD, """{"nonce":"$nonce","slotCode":"$slotCode","taskCode":null}""", deviceId)
+        val d = json.parseToJsonElement(claim).jsonObject.let { (it["data"]?.jsonObject ?: it) }
+        return str(d, "adToken")
+    }
+
+    /** 取清晰度列表与 exchangeToken。 */
+    fun qualities(deviceId: String, videoId: String, code: String, episodeNum: Int): Pair<String, String> {
+        val body = """{"videoId":"$videoId","code":"$code","episodeNum":$episodeNum,"qualities":[]}"""
+        val resp = SecureApi.postEncrypted(Config.PATH_RESOLVE_QUALITIES, body, deviceId)
+        val root = json.parseToJsonElement(resp).jsonObject
+        val data = root["data"]?.jsonObject ?: root
+        val et = str(data, "exchangeToken")
+        val q = data["qualities"]?.jsonArray?.firstOrNull()?.jsonObject?.let { str(it, "quality") } ?: ""
+        return Pair(et, q)
+    }
+
+    private fun findUrl(raw: ByteArray): String? {
+        val s = String(raw, Charsets.UTF_8)
+        val m = Regex("https?://[^\"'\\\\\\s]+").find(s)
+        return m?.value
     }
 }
