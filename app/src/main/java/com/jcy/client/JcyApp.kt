@@ -25,7 +25,8 @@ class JcyApp : Application() {
             val id = if (!androidId.isNullOrBlank() && androidId != "9774d56d682e549c") {
                 androidId!!
             } else {
-                java.util.UUID.randomUUID().toString().replace("-", "")
+                // 保证 16 位 hex（与官方 deviceId 形态一致）
+                java.util.UUID.randomUUID().toString().replace("-", "").substring(0, 16)
             }
             sp.edit().putString("device_id", id).apply()
             return id

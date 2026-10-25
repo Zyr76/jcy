@@ -84,12 +84,16 @@ object SecureApi {
             .header("X-Platform", Config.PLATFORM)
             .header("X-App-Id", Config.API_APP_ID)
             .header("X-Key-Version", keyVersion.toString())
-            .header("X-Device-Id", deviceId)
+            // 注意：negotiate 不能带 X-Device-Id（会走另一分支，响应无法解密）
             .build()
         http.newCall(req).execute().use { resp ->
             val body = resp.body?.bytes() ?: ByteArray(0)
             check(resp.isSuccessful) { "negotiate http ${resp.code}: ${String(body)}" }
-            // 响应体为 V3 加密的 JSON
+            val first = body.firstOrNull()?.toInt()?.and(0xFF)
+            if (first != 3) {
+                // 明文 JSON（通常是业务错误），直接抛出可读信息
+                throw IllegalStateException("negotiate plain: ${String(body, Charsets.UTF_8)}")
+            }
             val plain = master.decrypt(body)
             return json.decodeFromString(DeviceSecretInfo.serializer(), String(plain, Charsets.UTF_8))
         }
