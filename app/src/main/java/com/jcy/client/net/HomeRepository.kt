@@ -55,13 +55,19 @@ object HomeRepository {
         categoryName = str(o, "categoryName", "category", "typeName"),
     )
 
+    private fun okData(resp: String): JsonObject {
+        val root = json.parseToJsonElement(resp).jsonObject
+        val code = root["code"]?.jsonPrimitive?.intOrNull ?: 200
+        if (code != 200) throw IllegalStateException("接口错误 $code: ${str(root, "msg")}")
+        return root["data"]?.jsonObject ?: throw IllegalStateException("响应无 data: ${resp.take(200)}")
+    }
+
     /** 首页视频模块。 */
     fun videoModules(deviceId: String, pageIndex: Int = 1, pageSize: Int = 20): List<Module> {
         val body = """{"pageIndex":$pageIndex,"pageSize":$pageSize}"""
         val resp = SecureApi.postEncrypted(Config.PATH_VIDEO_MODULES, body, deviceId)
-        val root = json.parseToJsonElement(resp).jsonObject
-        val data = root["data"]?.jsonObject ?: root
-        val list = data["list"]?.jsonArray ?: return emptyList()
+        val data = okData(resp)
+        val list = data["list"]?.jsonArray ?: throw IllegalStateException("modules 无 list: ${resp.take(200)}")
         return list.mapNotNull { el ->
             val m = el.jsonObject
             val items = m["items"]?.jsonArray?.mapNotNull { runCatching { itemOf(it.jsonObject) }.getOrNull() } ?: emptyList()
@@ -78,8 +84,7 @@ object HomeRepository {
     fun recommend(deviceId: String, pageIndex: Int = 1, pageSize: Int = 40): List<VideoItem> {
         val body = """{"pageIndex":$pageIndex,"pageSize":$pageSize}"""
         val resp = SecureApi.postEncrypted(Config.PATH_HOME_RECOMMEND, body, deviceId)
-        val root = json.parseToJsonElement(resp).jsonObject
-        val data = root["data"]?.jsonObject ?: root
+        val data = okData(resp)
         val gyl = data["guessYouLike"]?.jsonObject
         val arr = gyl?.get("items")?.jsonArray ?: gyl?.get("list")?.jsonArray ?: data["list"]?.jsonArray
         return arr?.mapNotNull { runCatching { itemOf(it.jsonObject) }.getOrNull() } ?: emptyList()
@@ -89,8 +94,7 @@ object HomeRepository {
     fun videoDetail(deviceId: String, videoId: String): VideoDetail {
         val body = """{"videoId":"$videoId"}"""
         val resp = SecureApi.postEncrypted(Config.PATH_VIDEO_DETAIL, body, deviceId)
-        val root = json.parseToJsonElement(resp).jsonObject
-        val data = root["data"]?.jsonObject ?: root
+        val data = okData(resp)
         val sources = mutableListOf<PlaySource>()
         fun collect(obj: JsonObject) {
             val arr = obj["playSources"]?.jsonArray ?: obj["sources"]?.jsonArray ?: obj["players"]?.jsonArray ?: return

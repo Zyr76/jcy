@@ -4,6 +4,9 @@ import android.util.Log
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.intOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -94,32 +97,54 @@ object SecureApi {
                 // 明文 JSON（通常是业务错误），直接抛出可读信息
                 throw IllegalStateException("negotiate plain: ${String(body, Charsets.UTF_8)}")
             }
-            val plain = master.decrypt(body)
-            return json.decodeFromString(DeviceSecretInfo.serializer(), String(plain, Charsets.UTF_8))
+            val plain = String(master.decrypt(body), Charsets.UTF_8)
+            // 响应是 {code,msg,data:{deviceSecret,keyVersion,...}}，必须取 data 层
+            val root = json.parseToJsonElement(plain).jsonObject
+            val code = root["code"]?.jsonPrimitive?.intOrNull ?: 200
+            if (code != 200) throw IllegalStateException("negotiate code=$code msg=${root["msg"]}")
+            val dataObj = root["data"]?.jsonObject ?: root
+            val info = json.decodeFromString(DeviceSecretInfo.serializer(), dataObj.toString())
+            check(info.deviceSecret.isNotEmpty()) { "negotiate: deviceSecret empty" }
+            Log.i(TAG, "negotiate ok keyVersion=${info.keyVersion} secretLen=${info.deviceSecret.length}")
+            return info
         }
     }
 
-    /** POST 加密 JSON，返回解密后的 JSON 字符串。 */
+    /** POST 加密 JSON，返回解密后的 JSON 字符串；遇 4020 会话过期自动重协商重试一次。 */
     fun postEncrypted(path: String, bodyJson: String, deviceId: String, adSignature: String? = null): String {
-        val s = ensureSession(deviceId)
-        val cipher = s.biz.encryptText(bodyJson)
-        val req = Request.Builder()
-            .url("${s.gateway}$path?app_id=${Config.API_APP_ID}")
-            .post(cipher.toRequestBody(OCTET))
-            .header("X-Platform", Config.PLATFORM)
-            .header("X-App-Id", Config.API_APP_ID)
-            .header("X-Key-Version", s.device.keyVersion.toString())
-            .header("X-Device-Id", deviceId)
-            .apply { if (!adSignature.isNullOrEmpty()) header("X-Ad-Signature", adSignature) }
-            .build()
-        http.newCall(req).execute().use { resp ->
-            val raw = resp.body?.bytes() ?: ByteArray(0)
-            if (!resp.isSuccessful && raw.isEmpty()) throw IllegalStateException("http ${resp.code}")
-            val encryptedHeader = resp.header("X-Encrypted")
-            val plain = if (encryptedHeader != null || raw.firstOrNull()?.toInt() == 3) {
-                runCatching { s.biz.decrypt(raw) }.getOrElse { raw }
-            } else raw
-            return String(plain, Charsets.UTF_8)
+        var attempt = 0
+        while (true) {
+            val s = ensureSession(deviceId)
+            val cipher = s.biz.encryptText(bodyJson)
+            val req = Request.Builder()
+                .url("${s.gateway}$path?app_id=${Config.API_APP_ID}")
+                .post(cipher.toRequestBody(OCTET))
+                .header("X-Platform", Config.PLATFORM)
+                .header("X-App-Id", Config.API_APP_ID)
+                .header("X-Key-Version", s.device.keyVersion.toString())
+                .header("X-Device-Id", deviceId)
+                .apply { if (!adSignature.isNullOrEmpty()) header("X-Ad-Signature", adSignature) }
+                .build()
+            val text = http.newCall(req).execute().use { resp ->
+                val raw = resp.body?.bytes() ?: ByteArray(0)
+                if (!resp.isSuccessful && raw.isEmpty()) throw IllegalStateException("http ${resp.code}")
+                val encrypted = resp.header("X-Encrypted") != null || (raw.firstOrNull()?.toInt()?.and(0xFF) == 3)
+                val plain = if (encrypted) {
+                    runCatching { s.biz.decrypt(raw) }.getOrElse {
+                        Log.w(TAG, "decrypt failed, raw len=${raw.size} first=${raw.firstOrNull()?.toInt()?.and(0xFF)}")
+                        raw
+                    }
+                } else raw
+                String(plain, Charsets.UTF_8)
+            }
+            Log.i(TAG, "POST $path -> ${text.take(180)}")
+            if (attempt == 0 && text.contains("\"code\":4020")) {
+                Log.w(TAG, "session expired, renegotiating")
+                reset()
+                attempt++
+                continue
+            }
+            return text
         }
     }
 
