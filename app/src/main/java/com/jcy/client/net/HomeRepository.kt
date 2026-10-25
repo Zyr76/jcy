@@ -192,14 +192,35 @@ object ResolveRepository {
         headers?.forEach { (k, v) -> runCatching { reqB.header(k, v.jsonPrimitive.contentOrNull ?: "") } }
         val raw = up.newCall(reqB.build()).execute().use { it.body?.string().orEmpty() }
         if (raw.isEmpty()) return Pair(null, "upstream empty")
-        // 3) 若已是 JSON 直接用，否则 decrypt_response
+        // 3) 上游可能直接返回明文 JSON（x-form=android 时），否则走 server_sign 解密
         val plain = if (raw.trimStart().startsWith("{")) raw
         else sign(deviceId, code, episodeNum, "decrypt_response", kotlinx.serialization.json.JsonPrimitive(raw).toString(), adToken)
         val pj = json.parseToJsonElement(plain).jsonObject
         val pd = pj["data"]?.jsonObject ?: pj
-        val sign = pd["sign"]?.jsonObject
-        val url = sign?.let { str(it, "url") } ?: str(pd, "url")
-        return if (url.startsWith("http")) Pair(url, "") else Pair(null, "解析失败: ${plain.take(200)}")
+
+        // 格式 A：官方明文 {"data":{"playAddr":[{title,desc,vcodec,addr,m3u8FileDomain,format}]}}
+        val playAddr = pd["playAddr"]?.jsonArray
+        if (playAddr != null && playAddr.isNotEmpty()) {
+            val urls = playAddr.mapNotNull { el ->
+                runCatching {
+                    val o = el.jsonObject
+                    val addr = str(o, "addr")
+                    if (addr.isEmpty()) null else joinUrl(str(o, "m3u8FileDomain"), addr)
+                }.getOrNull()
+            }
+            if (urls.isNotEmpty()) return Pair(urls.first(), "")
+        }
+        // 格式 B：decrypt_response 结果 {"data":{"sign":{"url":"..."}}}
+        val signNode = pd["sign"]?.jsonObject
+        val url = signNode?.let { str(it, "url") } ?: str(pd, "url")
+        return if (url.startsWith("http")) Pair(url, "") else Pair(null, "解析失败: ${plain.take(300)}")
+    }
+
+    /** 拼接上游地址：addr 可能是 /path 或 //path，m3u8FileDomain 可能带尾斜杠 */
+    private fun joinUrl(domain: String, addr: String): String {
+        if (addr.startsWith("http")) return addr
+        if (domain.isEmpty()) return addr
+        return domain.trimEnd('/') + "/" + addr.trimStart('/')
     }
 
     private fun sign(deviceId: String, code: String, episodeNum: Int, action: String, paramsJson: String, adToken: String?): String {
