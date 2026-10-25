@@ -1,0 +1,3 @@
+-dontwarn okhttp3.**
+-dontwarn okio.**
+-keep class com.yy.myuko.feature.encryptionsdk.bridge.** { *; }
